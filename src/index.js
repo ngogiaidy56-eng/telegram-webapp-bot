@@ -1,30 +1,58 @@
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Max-Age": "86400",
+};
+
+const securityHeaders = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "X-XSS-Protection": "1; mode=block",
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+};
+
+function createResponse(body, status = 200, contentType = "application/json") {
+  const headers = {
+    "Content-Type": contentType,
+    ...corsHeaders,
+    ...securityHeaders,
+  };
+  return new Response(typeof body === "string" ? body : JSON.stringify(body), {
+    status,
+    headers,
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // 1. API TRẢ VỀ SỐ DƯ VÀ LỊCH SỬ CHO TRUNG TÂM KHÁCH HÀNG (MINI APP)
-    if (url.pathname === "/api/user-history") {
-      const userId = url.searchParams.get("user_id");
-      if (!userId) return new Response(JSON.stringify({ error: "Missing user_id" }), { status: 400 });
-
-      // Lấy số dư từ D1 Database
-      let user = await env.DB.prepare("SELECT balance FROM users WHERE user_id = ?").bind(userId).first();
-      let balance = user ? user.balance : 0.0;
-
-      // Lấy lịch sử giao dịch
-      let { results: history } = await env.DB.prepare(
-        "SELECT amount, reference_code as code, created_at as time FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT 10"
-      ).bind(userId).all();
-
-      return new Response(JSON.stringify({ balance, history }), {
-        headers: { 
-          "Content-Type": "application/json", 
-          "Access-Control-Allow-Origin": "*" // Cho phép Mini App gọi API cross-origin
-        }
-      });
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    // 2. WEBHOOK NHẬN TIỀN NGÂN HÀNG TỰ ĐỘNG
+    // 1. API TRẢ VỀ SỐ DƯ VÀ LỊCH SỬ CHO TRUNG TÂM KHÁCH HÀNG
+    if (url.pathname === "/api/user-history") {
+      const userId = url.searchParams.get("user_id");
+      if (!userId) return createResponse({ error: "Missing user_id" }, 400);
+
+      try {
+        let user = await env.DB.prepare("SELECT balance FROM users WHERE user_id = ?").bind(userId).first();
+        let balance = user ? user.balance : 0.0;
+
+        let { results: history } = await env.DB.prepare(
+          "SELECT amount, reference_code as code, created_at as time FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT 10"
+        ).bind(userId).all();
+
+        return createResponse({ balance, history });
+      } catch (err) {
+        return createResponse({ error: err.message }, 500);
+      }
+    }
+
+    // 2. WEBHOOK NGÂN HÀNG TỰ ĐỘNG CỘNG TIỀN
     if (url.pathname === "/webhook/bank" && request.method === "POST") {
       try {
         const data = await request.json();
@@ -38,20 +66,16 @@ export default {
             if (!isNaN(part) && part.length > 5) {
               const userId = parseInt(part);
 
-              // Cập nhật số dư vào bảng users
               await env.DB.prepare(
                 "INSERT INTO users (user_id, balance) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?"
               ).bind(userId, amount, amount).run();
 
-              // Lưu lịch sử giao dịch
               await env.DB.prepare(
                 "INSERT INTO transactions (user_id, amount, reference_code, created_at) VALUES (?, ?, ?, datetime('now', '+7 hours'))"
               ).bind(userId, amount, refCode).run();
 
-              // Lấy số dư mới
               let user = await env.DB.prepare("SELECT balance FROM users WHERE user_id = ?").bind(userId).first();
 
-              // Gửi tin nhắn thông báo về Telegram cho user
               await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -65,24 +89,23 @@ export default {
             }
           }
         }
-        return new Response(JSON.stringify({ status: "success" }), { headers: { "Content-Type": "application/json" } });
+        return createResponse({ status: "success" });
       } catch (err) {
-        return new Response(JSON.stringify({ status: "error", message: err.message }), { status: 500 });
+        return createResponse({ status: "error", message: err.message }, 500);
       }
     }
 
-    // 3. WEBHOOK CHÍNH CỦA TELEGRAM BOT
+    // 3. WEBHOOK TELEGRAM BOT
     if (url.pathname === "/" && request.method === "POST") {
       const update = await request.json();
       ctx.waitUntil(handleTelegramUpdate(update, env));
-      return new Response("OK");
+      return new Response("OK", { headers: securityHeaders });
     }
 
-    return new Response("Telegram Bot Worker is running successfully!", { status: 200 });
+    return createResponse("Telegram Bot Worker is running successfully!", 200, "text/plain");
   }
 };
 
-// Hàm xử lý tương tác tin nhắn Telegram
 async function handleTelegramUpdate(update, env) {
   if (update.message && update.message.text === "/start") {
     const chatId = update.message.chat.id;
