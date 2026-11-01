@@ -1,9 +1,9 @@
-name = "telegram-bot-worker"
+name = "telegram-bot-backend"
 main = "src/index.js"
 compatibility_date = "2026-03-01"
 
 [vars]
-WEBAPP_URL = "https://your-frontend.pages.dev/index.html"
+WEBAPP_URL = "https://telegram-webapp-bot-7ym.pages.dev/index.html"
 
 [[d1_databases]]
 binding = "DB"
