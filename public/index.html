@@ -1,0 +1,37 @@
+async function loadCustomerCenter() {
+    showView('customer-center');
+    const userId = tg.initDataUnsafe?.user?.id || 123456; 
+    
+    // Thay đổi domain này thành domain Worker của bạn (hoặc cấu hình relative nếu cùng custom domain)
+    const WORKER_API_URL = "https://telegram-bot-worker.your-subdomain.workers.dev"; 
+    
+    try {
+        let response = await fetch(`${WORKER_API_URL}/api/user-history?user_id=${userId}`);
+        let data = await response.json();
+        
+        document.getElementById('user-balance').innerText = data.balance.toLocaleString() + " VNĐ";
+        
+        let historyContainer = document.getElementById('tx-history-list');
+        historyContainer.innerHTML = "";
+        
+        if (data.history.length === 0) {
+            historyContainer.innerHTML = `<p style="font-size: 12px; color: #94a3b8;">Chưa có giao dịch nào.</p>`;
+        } else {
+            data.history.forEach(tx => {
+                historyContainer.innerHTML += `
+                    <div class="tx-item">
+                        <div>
+                            <span style="color: #4ade80; font-weight: bold;">+${tx.amount.toLocaleString()}đ</span><br>
+                            <small style="color: #94a3b8;">Mã: ${tx.code}</small>
+                        </div>
+                        <div style="text-align: right;">
+                            <small style="color: #94a3b8;">${tx.time}</small>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+    } catch (e) {
+        document.getElementById('tx-history-list').innerHTML = `<p style="font-size: 12px; color: #ef4444;">Không thể tải lịch sử giao dịch.</p>`;
+    }
+}
