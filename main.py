@@ -11,9 +11,10 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Lấy Token từ biến môi trường hoặc điền trực tiếp
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-# URL khi deploy lên Cloud (Ví dụ: https://ten-ung-dung.onrender.com/static/index.html)
+# Token của bạn đã được gắn trực tiếp vào đây
+BOT_TOKEN = "8884608128:AAHonVl55GIxT9i6Y0_W7tqrWMcGVVrv088"
+
+# Đừng quên thay thế URL này bằng domain thật khi bạn deploy lên Cloud (Render, Railway, VPS...)
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://domain-cua-ban.com/static/index.html")
 
 telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
