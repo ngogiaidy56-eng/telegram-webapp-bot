@@ -23,7 +23,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Token bot và cấu hình URL
 BOT_TOKEN = "8884608128:AAHonVl55GIxT9i6Y0_W7tqrWMcGVVrv088"
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://domain-cua-ban.com/static/index.html")
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://1b8fc54e.telegram-webapp-bot-7ym.pages.dev/static/index.html")
 
 # --- CƠ SỞ DỮ LIỆU SQLITE ---
 def init_db():
