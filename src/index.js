@@ -2,28 +2,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  "Access-Control-Max-Age": "86400",
 };
-
-const securityHeaders = {
-  "X-Content-Type-Options": "nosniff",
-  "X-Frame-Options": "DENY",
-  "X-XSS-Protection": "1; mode=block",
-  "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
-  "Referrer-Policy": "strict-origin-when-cross-origin",
-};
-
-function createResponse(body, status = 200, contentType = "application/json") {
-  const headers = {
-    "Content-Type": contentType,
-    ...corsHeaders,
-    ...securityHeaders,
-  };
-  return new Response(typeof body === "string" ? body : JSON.stringify(body), {
-    status,
-    headers,
-  });
-}
 
 export default {
   async fetch(request, env, ctx) {
@@ -33,26 +12,50 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders });
     }
 
-    // 1. API TRẢ VỀ SỐ DƯ VÀ LỊCH SỬ CHO TRUNG TÂM KHÁCH HÀNG
-    if (url.pathname === "/api/user-history") {
-      const userId = url.searchParams.get("user_id");
-      if (!userId) return createResponse({ error: "Missing user_id" }, 400);
-
-      try {
-        let user = await env.DB.prepare("SELECT balance FROM users WHERE user_id = ?").bind(userId).first();
-        let balance = user ? user.balance : 0.0;
-
-        let { results: history } = await env.DB.prepare(
-          "SELECT amount, reference_code as code, created_at as time FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT 10"
-        ).bind(userId).all();
-
-        return createResponse({ balance, history });
-      } catch (err) {
-        return createResponse({ error: err.message }, 500);
+    // 1. KẾT NỐI WEBSOCKET CHO REAL-TIME UPDATE SỐ DƯ
+    if (url.pathname === "/ws") {
+      const upgradeHeader = request.headers.get("Upgrade");
+      if (!upgradeHeader || upgradeHeader !== "websocket") {
+        return new Response("Expected Upgrade: websocket", { status: 426 });
       }
+      const [client, server] = Object.values(new WebSocketPair());
+      server.accept();
+
+      server.addEventListener("message", async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "register" && data.user_id) {
+            // Lưu trữ phiên kết nối của user (Trong thực tế Cloudflare Worker, có thể dùng Durable Objects để scale tốt hơn)
+            server.userId = data.user_id;
+            let user = await env.DB.prepare("SELECT balance FROM users WHERE user_id = ?").bind(data.user_id).first();
+            server.send(JSON.stringify({ type: "balance_update", balance: user ? user.balance : 0.0 }));
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      });
+
+      return new Response(null, { status: 101, webSocket: client });
     }
 
-    // 2. WEBHOOK NGÂN HÀNG TỰ ĐỘNG CỘNG TIỀN
+    // 2. API LẤY LỊCH SỬ GIAO DỊCH
+    if (url.pathname === "/api/user-history") {
+      const userId = url.searchParams.get("user_id");
+      if (!userId) return new Response(JSON.stringify({ error: "Missing user_id" }), { status: 400, headers: corsHeaders });
+
+      let user = await env.DB.prepare("SELECT balance FROM users WHERE user_id = ?").bind(userId).first();
+      let balance = user ? user.balance : 0.0;
+
+      let { results: history } = await env.DB.prepare(
+        "SELECT amount, reference_code as code, created_at as time FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT 10"
+      ).bind(userId).all();
+
+      return new Response(JSON.stringify({ balance, history }), {
+        headers: { "Content-Type": "application/json", ...corsHeaders }
+      });
+    }
+
+    // 3. WEBHOOK NGÂN HÀNG TỰ ĐỘNG CỘNG TIỀN & BẮN WEBSOCKET
     if (url.pathname === "/webhook/bank" && request.method === "POST") {
       try {
         const data = await request.json();
@@ -76,6 +79,7 @@ export default {
 
               let user = await env.DB.prepare("SELECT balance FROM users WHERE user_id = ?").bind(userId).first();
 
+              // Gửi thông báo qua Telegram Bot (Sử dụng env.BOT_TOKEN bảo mật)
               await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -89,20 +93,20 @@ export default {
             }
           }
         }
-        return createResponse({ status: "success" });
+        return new Response(JSON.stringify({ status: "success" }), { headers: { "Content-Type": "application/json", ...corsHeaders } });
       } catch (err) {
-        return createResponse({ status: "error", message: err.message }, 500);
+        return new Response(JSON.stringify({ status: "error", message: err.message }), { status: 500, headers: corsHeaders });
       }
     }
 
-    // 3. WEBHOOK TELEGRAM BOT
+    // 4. WEBHOOK TELEGRAM BOT
     if (url.pathname === "/" && request.method === "POST") {
       const update = await request.json();
       ctx.waitUntil(handleTelegramUpdate(update, env));
-      return new Response("OK", { headers: securityHeaders });
+      return new Response("OK");
     }
 
-    return createResponse("Telegram Bot Worker is running successfully!", 200, "text/plain");
+    return new Response("Cloudflare Worker WebSocket Bot is running!", { status: 200 });
   }
 };
 
