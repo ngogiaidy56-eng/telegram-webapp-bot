@@ -4,7 +4,6 @@ compatibility_date = "2026-03-01"
 
 [vars]
 BOT_TOKEN = "8884608128:AAHonVl55GIxT9i6Y0_W7tqrWMcGVVrv088"
-# Thay bằng URL khi Cloudflare Pages triển khai thành công (Ví dụ: https://my-bot-ui.pages.dev/index.html)
 WEBAPP_URL = "https://your-frontend.pages.dev/index.html"
 
 [[d1_databases]]
